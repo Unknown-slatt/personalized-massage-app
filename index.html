@@ -9,8 +9,10 @@
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX compilation in browser -->
+    <!-- Babel for JSX compilation -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <script>
@@ -46,6 +48,11 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
+        // Initialize Supabase Client with your credentials
+        const SUPABASE_URL = "https://ijojvlhnabdbjsidzdro.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_vQqpMKPHdtaUUoQhiVMJbQ_mNDHSueI";
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
         function App() {
             const [view, setView] = useState('home'); // 'home', 'booking', 'admin', 'confirmation'
             const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
@@ -53,6 +60,9 @@
             const [passwordInput, setPasswordInput] = useState('');
             const [showPassword, setShowPassword] = useState(false);
             const [bookingDetails, setBookingDetails] = useState(null);
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [bookings, setBookings] = useState([]);
+            const [loadingBookings, setLoadingBookings] = useState(false);
 
             // Services State
             const [services, setServices] = useState([
@@ -69,22 +79,17 @@
 
             // Therapists State
             const [therapists, setTherapists] = useState([
-                { id: 't-1', name: 'Sophia Lane', phone: '+1 (555) 234-5678', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', bio: 'Expert in Deep Tissue and therapeutic healing with 6+ years experience.', active: true },
-                { id: 't-2', name: 'Elena Rostova', phone: '+1 (555) 876-5432', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', bio: 'Specialist in Hot Stone rituals and holistic body wellness.', active: true },
-                { id: 't-3', name: 'Marcus Vance', phone: '+1 (555) 345-6789', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', bio: 'Master of sports recovery and custom deep tissue manipulation.', active: true }
+                { id: 't-1', name: 'Sophia Lane', phone: '+1 (555) 234-5678', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', bio: 'Expert in Deep Tissue and therapeutic healing.', active: true },
+                { id: 't-2', name: 'Elena Rostova', phone: '+1 (555) 876-5432', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', bio: 'Specialist in Hot Stone rituals.', active: true },
+                { id: 't-3', name: 'Marcus Vance', phone: '+1 (555) 345-6789', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', bio: 'Master of sports recovery manipulation.', active: true }
             ]);
 
             // Payment Methods State
             const [paymentMethods, setPaymentMethods] = useState([
-                { id: 'p-1', name: 'Zelle / Bank Transfer', active: true, instructions: 'Send payment to finance@personalizedexperience.com and attach confirmation.' },
-                { id: 'p-2', name: 'Cash App', active: true, instructions: '$PersonalizedSpa - Include your full name in the note.' },
-                { id: 'p-3', name: 'Cryptocurrency (USDT/BTC)', active: true, instructions: 'Wallet: 0x71C...39a - Send exact total and save transaction hash.' },
-                { id: 'p-4', name: 'Cash on Arrival', active: true, instructions: 'Exact cash preferred upon therapist arrival.' }
-            ]);
-
-            // Bookings State
-            const [bookings, setBookings] = useState([
-                { id: 'b-101', fullName: 'Alexander Wright', phone: '+1 555-0192', email: 'alex@example.com', address: '742 Evergreen Terrace, Suite 4', date: '2026-11-15', time: '14:00', duration: '60', service: 'Deep Tissue Therapy', therapist: 'Sophia Lane', paymentMethod: 'Zelle / Bank Transfer', total: 120, deposit: 60, status: 'Confirmed' }
+                { id: 'p-1', name: 'Zelle / Bank Transfer', active: true },
+                { id: 'p-2', name: 'Cash App', active: true },
+                { id: 'p-3', name: 'Cryptocurrency (USDT/BTC)', active: true },
+                { id: 'p-4', name: 'Cash on Arrival', active: true }
             ]);
 
             // Booking Form State
@@ -100,6 +105,28 @@
             const [paymentMethod, setPaymentMethod] = useState(paymentMethods[0].name);
             const [agreedDeposit, setAgreedDeposit] = useState(false);
 
+            // Fetch real bookings from Supabase
+            const fetchBookings = async () => {
+                setLoadingBookings(true);
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (error) {
+                    console.error('Error fetching bookings:', error);
+                } else if (data) {
+                    setBookings(data);
+                }
+                setLoadingBookings(false);
+            };
+
+            useEffect(() => {
+                if (isAdminLoggedIn) {
+                    fetchBookings();
+                }
+            }, [isAdminLoggedIn]);
+
             // Calculated pricing
             const currentTotal = useMemo(() => {
                 const mult = multipliers[duration] || 1.0;
@@ -108,29 +135,72 @@
 
             const currentDeposit = useMemo(() => Math.round(currentTotal / 2), [currentTotal]);
 
-            const handleBookingSubmit = (e) => {
+            // Submit booking to Supabase database
+            const handleBookingSubmit = async (e) => {
                 e.preventDefault();
                 if (!agreedDeposit) {
                     alert('You must accept the 50% deposit agreement to proceed.');
                     return;
                 }
-                const newBooking = {
-                    id: 'b-' + Math.floor(1000 + Math.random() * 9000),
-                    fullName, phone, email, address,
-                    date: bookingDate, time: bookingTime,
-                    duration, service: selectedService.name,
+
+                setIsSubmitting(true);
+
+                const payload = {
+                    full_name: fullName,
+                    phone: phone,
+                    email: email,
+                    address: address,
+                    booking_date: bookingDate,
+                    booking_time: bookingTime,
+                    duration: duration,
+                    service: selectedService.name,
                     therapist: selectedTherapist.name,
-                    paymentMethod, total: currentTotal, deposit: currentDeposit,
+                    payment_method: paymentMethod,
+                    total: currentTotal,
+                    deposit: currentDeposit,
                     status: 'Pending'
                 };
-                setBookings([newBooking, ...bookings]);
-                setBookingDetails(newBooking);
-                setView('confirmation');
+
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .insert([payload])
+                    .select();
+
+                setIsSubmitting(false);
+
+                if (error) {
+                    alert('Error saving booking to database: ' + error.message);
+                } else {
+                    const createdBooking = data[0];
+                    setBookingDetails({
+                        id: 'DB-' + createdBooking.id,
+                        fullName, phone, email, address,
+                        date: bookingDate, time: bookingTime,
+                        duration, service: selectedService.name,
+                        therapist: selectedTherapist.name,
+                        paymentMethod, total: currentTotal, deposit: currentDeposit
+                    });
+                    setView('confirmation');
+                }
+            };
+
+            // Update Status in Supabase
+            const updateBookingStatus = async (id, newStatus) => {
+                const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: newStatus })
+                    .eq('id', id);
+
+                if (error) {
+                    alert('Failed to update status: ' + error.message);
+                } else {
+                    fetchBookings();
+                }
             };
 
             return (
                 <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-                    {/* Navigation Bar */}
+                    {/* Header */}
                     <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex justify-between items-center">
                         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setView('home')}>
                             <div className="bg-amber-500 text-slate-950 p-2 rounded-lg font-bold font-serif tracking-wider text-xl">PE</div>
@@ -146,12 +216,11 @@
                         </div>
                     </header>
 
-                    {/* Main Content Area */}
+                    {/* Main Content */}
                     <main className="flex-1">
                         {/* HOME VIEW */}
                         {view === 'home' && (
                             <div>
-                                {/* Hero Section */}
                                 <div className="relative bg-gradient-to-b from-slate-900 to-slate-950 py-24 px-6 text-center border-b border-slate-800">
                                     <div className="max-w-3xl mx-auto space-y-6">
                                         <span className="bg-amber-500/10 text-amber-400 text-xs font-semibold px-3 py-1 rounded-full uppercase tracking-widest border border-amber-500/20">Exquisite Private Treatments</span>
@@ -163,7 +232,6 @@
                                     </div>
                                 </div>
 
-                                {/* Services Grid */}
                                 <div className="max-w-7xl mx-auto px-6 py-16">
                                     <div className="text-center mb-12">
                                         <h2 className="font-serif text-3xl font-bold text-white mb-2">Our Signature Services</h2>
@@ -180,8 +248,8 @@
                                                     <h3 className="font-serif text-xl font-bold text-white mb-2">{srv.name}</h3>
                                                     <p className="text-slate-400 text-sm mb-6">Tailored pressure points, premium aromatic oils, and expert therapeutic execution.</p>
                                                 </div>
-                                                <button onClick={() => { setSelectedService(srv); setView('booking'); }} className="w-full bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 py-3 rounded-xl font-medium transition flex items-center justify-center space-x-2">
-                                                    <span>Select & Configure</span>
+                                                <button onClick={() => { setSelectedService(srv); setView('booking'); }} className="w-full bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 py-3 rounded-xl font-medium transition">
+                                                    Select & Configure
                                                 </button>
                                             </div>
                                         ))}
@@ -190,7 +258,7 @@
                             </div>
                         )}
 
-                        {/* BOOKING FLOW VIEW */}
+                        {/* BOOKING FLOW */}
                         {view === 'booking' && (
                             <div className="max-w-4xl mx-auto px-6 py-12">
                                 <div className="mb-8">
@@ -199,12 +267,11 @@
                                 </div>
 
                                 <form onSubmit={handleBookingSubmit} className="space-y-8 bg-slate-900 border border-slate-800 p-8 rounded-3xl">
-                                    {/* 1. Service Selection */}
                                     <div>
                                         <label className="block text-sm font-semibold text-amber-400 uppercase tracking-wider mb-3">1. Choose Service</label>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {services.filter(s => s.active).map(srv => (
-                                                <div key={srv.id} onClick={() => setSelectedService(srv)} className={`p-4 rounded-xl border cursor-pointer transition flex justify-between items-center ${selectedService.id === srv.id ? 'border-amber-500 bg-amber-500/10' : 'border-slate-800 bg-slate-950 hover:border-slate-700'}`}>
+                                                <div key={srv.id} onClick={() => setSelectedService(srv)} className={`p-4 rounded-xl border cursor-pointer transition flex justify-between items-center ${selectedService.id === srv.id ? 'border-amber-500 bg-amber-500/10' : 'border-slate-800 bg-slate-950'}`}>
                                                     <div>
                                                         <p className="font-semibold text-white">{srv.name}</p>
                                                         <p className="text-xs text-slate-400">${srv.basePrice} base rate</p>
@@ -215,7 +282,6 @@
                                         </div>
                                     </div>
 
-                                    {/* 2. Duration Multiplier */}
                                     <div>
                                         <label className="block text-sm font-semibold text-amber-400 uppercase tracking-wider mb-3">2. Select Duration</label>
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -228,7 +294,6 @@
                                         </div>
                                     </div>
 
-                                    {/* 3. Preferred Therapist */}
                                     <div>
                                         <label className="block text-sm font-semibold text-amber-400 uppercase tracking-wider mb-3">3. Preferred Therapist</label>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -244,7 +309,6 @@
                                         </div>
                                     </div>
 
-                                    {/* 4. Date, Time & Contact Info */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
                                             <label className="block text-sm font-medium text-slate-300 mb-2">Full Name</label>
@@ -267,12 +331,11 @@
                                             <input type="date" required value={bookingDate} onChange={e => setBookingDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500" />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-300 mb-2">Appointment Time (Real-time check)</label>
+                                            <label className="block text-sm font-medium text-slate-300 mb-2">Appointment Time</label>
                                             <input type="time" required value={bookingTime} onChange={e => setBookingTime(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500" />
                                         </div>
                                     </div>
 
-                                    {/* 5. Payment Method */}
                                     <div>
                                         <label className="block text-sm font-semibold text-amber-400 uppercase tracking-wider mb-3">5. Select Payment Method</label>
                                         <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500">
@@ -282,24 +345,23 @@
                                         </select>
                                     </div>
 
-                                    {/* Cost Breakdown & Deposit Agreement */}
                                     <div className="bg-slate-950 border border-slate-800 p-6 rounded-2xl space-y-4">
                                         <div className="flex justify-between text-slate-300">
                                             <span>Service: {selectedService.name} ({duration} mins)</span>
                                             <span>${currentTotal}</span>
                                         </div>
                                         <div className="flex justify-between text-amber-400 font-bold text-lg border-t border-slate-800 pt-3">
-                                            <span>Required 50% Deposit to Confirm:</span>
+                                            <span>Required 50% Deposit:</span>
                                             <span>${currentDeposit}</span>
                                         </div>
                                         <label className="flex items-center space-x-3 pt-2 cursor-pointer">
-                                            <input type="checkbox" required checked={agreedDeposit} onChange={e => setAgreedDeposit(e.target.checked)} className="w-5 h-5 text-amber-500 rounded bg-slate-900 border-slate-700 focus:ring-amber-500" />
-                                            <span className="text-xs text-slate-300">I agree to the non-refundable 50% deposit policy (${currentDeposit}) to secure my appointment time.</span>
+                                            <input type="checkbox" required checked={agreedDeposit} onChange={e => setAgreedDeposit(e.target.checked)} className="w-5 h-5 text-amber-500 rounded bg-slate-900 border-slate-700" />
+                                            <span className="text-xs text-slate-300">I agree to the non-refundable 50% deposit policy (${currentDeposit}) to secure my appointment.</span>
                                         </label>
                                     </div>
 
-                                    <button type="submit" className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-xl text-lg transition shadow-xl">
-                                        Confirm Booking & Pay ${currentDeposit} Deposit
+                                    <button type="submit" disabled={isSubmitting} className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-xl text-lg transition shadow-xl disabled:opacity-50">
+                                        {isSubmitting ? 'Saving Booking to Cloud Database...' : `Confirm Booking & Pay $${currentDeposit} Deposit`}
                                     </button>
                                 </form>
                             </div>
@@ -309,11 +371,11 @@
                         {view === 'confirmation' && bookingDetails && (
                             <div className="max-w-2xl mx-auto px-6 py-16 text-center space-y-6">
                                 <div className="w-20 h-20 bg-amber-500/10 border border-amber-500 text-amber-400 rounded-full flex items-center justify-center mx-auto text-3xl font-bold">✓</div>
-                                <h2 className="font-serif text-3xl font-bold text-white">Booking Request Received!</h2>
-                                <p className="text-slate-400">Thank you, <strong className="text-white">{bookingDetails.fullName}</strong>. Your session for <strong className="text-amber-400">{bookingDetails.service}</strong> with <strong className="text-white">{bookingDetails.therapist}</strong> is pending deposit verification.</p>
+                                <h2 className="font-serif text-3xl font-bold text-white">Booking Saved to Database!</h2>
+                                <p className="text-slate-400">Thank you, <strong className="text-white">{bookingDetails.fullName}</strong>. Your session for <strong className="text-amber-400">{bookingDetails.service}</strong> with <strong className="text-white">{bookingDetails.therapist}</strong> has been logged.</p>
                                 
                                 <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl text-left space-y-3">
-                                    <div className="flex justify-between text-sm"><span className="text-slate-400">Booking ID:</span> <span className="font-mono text-amber-400">{bookingDetails.id}</span></div>
+                                    <div className="flex justify-between text-sm"><span className="text-slate-400">Booking Record ID:</span> <span className="font-mono text-amber-400">{bookingDetails.id}</span></div>
                                     <div className="flex justify-between text-sm"><span className="text-slate-400">Date & Time:</span> <span className="text-white">{bookingDetails.date} at {bookingDetails.time}</span></div>
                                     <div className="flex justify-between text-sm"><span className="text-slate-400">Location:</span> <span className="text-white">{bookingDetails.address}</span></div>
                                     <div className="flex justify-between text-sm"><span className="text-slate-400">Chosen Payment:</span> <span className="text-white">{bookingDetails.paymentMethod}</span></div>
@@ -330,7 +392,7 @@
                                     <div className="max-w-md mx-auto bg-slate-900 border border-slate-800 p-8 rounded-3xl space-y-6">
                                         <div className="text-center">
                                             <h2 className="font-serif text-2xl font-bold text-white mb-2">Owner Admin Login</h2>
-                                            <p className="text-xs text-slate-400">Strictly confidential owner panel access.</p>
+                                            <p className="text-xs text-slate-400">Access live cloud bookings database.</p>
                                         </div>
                                         <form onSubmit={(e) => {
                                             e.preventDefault();
@@ -348,100 +410,66 @@
                                         </form>
                                     </div>
                                 ) : (
-                                    <div className="space-y-12">
+                                    <div className="space-y-8">
                                         <div className="flex justify-between items-center border-b border-slate-800 pb-6">
                                             <div>
-                                                <h2 className="font-serif text-3xl font-bold text-white">Owner Control Center</h2>
-                                                <p className="text-slate-400 text-sm">Manage therapists, pricing multipliers, bookings, and cloud deployment guides.</p>
+                                                <h2 className="font-serif text-3xl font-bold text-white">Live Supabase Bookings</h2>
+                                                <p className="text-slate-400 text-sm">Real-time bookings synchronized with your cloud database.</p>
                                             </div>
-                                            <button onClick={() => setIsAdminLoggedIn(false)} className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl text-sm font-medium">Lock Admin</button>
+                                            <div className="flex space-x-3">
+                                                <button onClick={fetchBookings} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium">Refresh Data</button>
+                                                <button onClick={() => setIsAdminLoggedIn(false)} className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl text-sm font-medium">Lock Panel</button>
+                                            </div>
                                         </div>
 
-                                        {/* Bookings Tracker */}
                                         <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
-                                            <h3 className="font-serif text-xl font-bold text-white mb-4">Customer Bookings Tracker ({bookings.length})</h3>
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-left text-sm">
-                                                    <thead className="border-b border-slate-800 text-slate-400 uppercase text-xs">
-                                                        <tr>
-                                                            <th className="pb-3">ID / Client</th>
-                                                            <th className="pb-3">Service & Time</th>
-                                                            <th className="pb-3">Therapist</th>
-                                                            <th className="pb-3">Deposit / Total</th>
-                                                            <th className="pb-3">Status</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-800">
-                                                        {bookings.map(b => (
-                                                            <tr key={b.id} className="hover:bg-slate-950/50">
-                                                                <td className="py-4">
-                                                                    <p className="font-semibold text-white">{b.fullName}</p>
-                                                                    <p className="text-xs text-slate-400">{b.phone} | {b.address}</p>
-                                                                </td>
-                                                                <td className="py-4">
-                                                                    <p className="text-white">{b.service} ({b.duration}m)</p>
-                                                                    <p className="text-xs text-slate-400">{b.date} at {b.time}</p>
-                                                                </td>
-                                                                <td className="py-4 text-slate-300">{b.therapist}</td>
-                                                                <td className="py-4">
-                                                                    <p className="text-amber-400 font-bold">${b.deposit} dep</p>
-                                                                    <p className="text-xs text-slate-400">Total: ${b.total}</p>
-                                                                </td>
-                                                                <td className="py-4">
-                                                                    <select value={b.status} onChange={e => {
-                                                                        const updated = bookings.map(item => item.id === b.id ? {...item, status: e.target.value} : item);
-                                                                        setBookings(updated);
-                                                                    }} className="bg-slate-950 border border-slate-800 text-xs text-amber-400 rounded-lg px-2 py-1">
-                                                                        <option value="Pending">Pending</option>
-                                                                        <option value="Confirmed">Confirmed</option>
-                                                                        <option value="Completed">Completed</option>
-                                                                        <option value="Cancelled">Cancelled</option>
-                                                                    </select>
-                                                                </td>
+                                            {loadingBookings ? (
+                                                <p className="text-center text-slate-400 py-8">Fetching live database records...</p>
+                                            ) : bookings.length === 0 ? (
+                                                <p className="text-center text-slate-400 py-8">No bookings found in database yet. Submit a test booking on the live site!</p>
+                                            ) : (
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-left text-sm">
+                                                        <thead className="border-b border-slate-800 text-slate-400 uppercase text-xs">
+                                                            <tr>
+                                                                <th className="pb-3">Client Contact</th>
+                                                                <th className="pb-3">Service & Timing</th>
+                                                                <th className="pb-3">Therapist</th>
+                                                                <th className="pb-3">Payment</th>
+                                                                <th className="pb-3">Database Status</th>
                                                             </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-
-                                        {/* Deployment Guide & Supabase SQL Script */}
-                                        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-6">
-                                            <h3 className="font-serif text-xl font-bold text-amber-400">Publishing & Supabase Cloud Setup Guide</h3>
-                                            <div className="space-y-4 text-sm text-slate-300">
-                                                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                                                    <h4 className="font-bold text-white mb-2">Step 1: Host Free on Netlify</h4>
-                                                    <ol className="list-decimal list-inside space-y-1 text-slate-400">
-                                                        <li>Save this single file as <code className="text-amber-400 font-mono">index.html</code> in your GitHub repository.</li>
-                                                        <li>Log into Netlify and import your repository.</li>
-                                                        <li>Deploy instantly as a static site with zero build commands required!</li>
-                                                    </ol>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-800">
+                                                            {bookings.map(b => (
+                                                                <tr key={b.id} className="hover:bg-slate-950/50">
+                                                                    <td className="py-4">
+                                                                        <p className="font-semibold text-white">{b.full_name}</p>
+                                                                        <p className="text-xs text-slate-400">{b.phone}</p>
+                                                                        <p className="text-xs text-slate-500">{b.address}</p>
+                                                                    </td>
+                                                                    <td className="py-4">
+                                                                        <p className="text-white">{b.service} ({b.duration}m)</p>
+                                                                        <p className="text-xs text-slate-400">{b.booking_date} at {b.booking_time}</p>
+                                                                    </td>
+                                                                    <td className="py-4 text-slate-300">{b.therapist}</td>
+                                                                    <td className="py-4">
+                                                                        <p className="text-amber-400 font-bold">${b.deposit} deposit</p>
+                                                                        <p className="text-xs text-slate-400">Total: ${b.total} ({b.payment_method})</p>
+                                                                    </td>
+                                                                    <td className="py-4">
+                                                                        <select value={b.status} onChange={e => updateBookingStatus(b.id, e.target.value)} className="bg-slate-950 border border-slate-800 text-xs text-amber-400 rounded-lg px-2 py-1">
+                                                                            <option value="Pending">Pending</option>
+                                                                            <option value="Confirmed">Confirmed</option>
+                                                                            <option value="Completed">Completed</option>
+                                                                            <option value="Cancelled">Cancelled</option>
+                                                                        </select>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
                                                 </div>
-
-                                                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                                                    <h4 className="font-bold text-white mb-2">Step 2: Connect Free Supabase Database (SQL Schema)</h4>
-                                                    <p className="text-slate-400 mb-2">Run this full SQL script in your Supabase SQL Editor to initialize your tables:</p>
-                                                    <pre className="bg-slate-900 p-4 rounded-lg text-xs font-mono text-amber-300 overflow-x-auto">
-{`CREATE TABLE bookings (
-    id SERIAL PRIMARY KEY,
-    full_name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    email TEXT NOT NULL,
-    address TEXT NOT NULL,
-    booking_date DATE NOT NULL,
-    booking_time TIME NOT NULL,
-    duration TEXT NOT NULL,
-    service TEXT NOT NULL,
-    therapist TEXT NOT NULL,
-    payment_method TEXT NOT NULL,
-    total NUMERIC NOT NULL,
-    deposit NUMERIC NOT NULL,
-    status TEXT DEFAULT 'Pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`}
-                                                    </pre>
-                                                </div>
-                                            </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
